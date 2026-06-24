@@ -1,0 +1,24 @@
+{
+  "PXL_20260624_160346844.mp4": {
+    "video_info": {
+      "duration": 68.13476666666666,
+      "fps": 29.99936889781673,
+      "width": 1920,
+      "height": 1080,
+      "codec": "hevc",
+      "total_frames": 2044,
+      "rotation": 90
+    },
+    "segments": [
+      {
+        "start_time": 35.16711111111111,
+        "end_time": 49.83444444444444,
+        "duration": 14.667333333333332,
+        "score": 0.473557277838363,
+        "frame_start": 1055,
+        "frame_end": 1495
+      }
+    ],
+    "rotation": 90
+  }
+}
