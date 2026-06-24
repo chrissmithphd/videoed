@@ -75,6 +75,7 @@ videoed/
 ├── .claude/
 │   └── plans/VideoReel-Generator/
 │       └── current_plan.md          # Task tracking
+├── AUDIO_SEARCH_OPTIONS.md          # Audio search APIs & MCP servers guide
 ├── CLAUDE.md                         # This file
 ├── README.md                         # Project documentation
 ├── RESEARCH.md                       # Detailed research findings
@@ -84,6 +85,7 @@ videoed/
     ├── motion_analyzer.py
     ├── interest_scorer.py
     ├── segment_extractor.py
+    ├── audio_finder.py              # NEW: Unified CC music search
     └── cli.py
 ```
 
@@ -128,6 +130,16 @@ pip install opencv-python scenedetect av numpy ultralytics torch
 pip install torch --index-url https://download.pytorch.org/whl/cu121  # CUDA 12.1
 ```
 
+### Audio Search (Creative Commons Music)
+```bash
+# Primary: Jamendo + Freesound
+pip install requests git+https://github.com/MTG/freesound-python python-dotenv
+
+# Freesound MCP Server (optional, for Claude Desktop integration)
+git clone https://github.com/johnkimdw/freesound-mcp-server.git
+cd freesound-mcp-server && docker build -t freesound-mcp .
+```
+
 ## Next Session Guidance
 
 ### If Starting Prototyping:
@@ -138,7 +150,10 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121  # CUDA 12.
 5. Add progress bars (tqdm) early - critical for long video UX
 
 ### If Continuing Research:
-- Audio overlay: Research librosa, pydub, or MoviePy audio handling
+- **Audio overlay:** COMPLETE - See `AUDIO_SEARCH_OPTIONS.md` for MCP servers and APIs
+  - Recommended: Jamendo API (primary), Freesound API (secondary)
+  - MCP Server: Freesound MCP (johnkimdw/freesound-mcp-server)
+  - Python implementation: Unified AudioFinder class included
 - Text overlay: Research Pillow + OpenCV or MoviePy TextClip
 - Speech-to-text: Research OpenAI Whisper for auto-captioning
 
@@ -155,11 +170,15 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121  # CUDA 12.
 - PySceneDetect: https://scenedetect.com
 - OpenCV: https://docs.opencv.org/4.x/
 - YOLO: https://docs.ultralytics.com/
+- Jamendo API: https://developer.jamendo.com/v3.0
+- Freesound API: https://freesound.org/docs/api/
 
 ### Key GitHub Repos
 - PyAV: https://github.com/PyAV-Org/PyAV (3.2k stars, active)
 - PySceneDetect: https://github.com/Breakthrough/PySceneDetect (4.9k stars, active)
 - Ultralytics: https://github.com/ultralytics/ultralytics (very active, updated June 2026)
+- Freesound MCP: https://github.com/johnkimdw/freesound-mcp-server (5 stars, Python)
+- Freesound Python: https://github.com/MTG/freesound-python (official library)
 
 ---
 

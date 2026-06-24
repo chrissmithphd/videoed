@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-VideoReel Generator - With Music Overlay
-Extracts interesting segments from B-roll footage and adds background music
+VideoReel Generator - WITH MUSIC
+Extracts interesting segments and adds background music using FFmpeg
 """
 
 import av
@@ -10,26 +10,42 @@ import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 import json
-from typing import List, Dict, Optional
+from typing import List, Dict, Tuple, Optional
 import argparse
+import subprocess
 import random
-import sys
 
-# Optional MoviePy for music overlay
-try:
-    from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip
-    MOVIEPY_AVAILABLE = True
-except ImportError:
-    MOVIEPY_AVAILABLE = False
-    print("Warning: MoviePy not installed. Music overlay disabled.")
-    print("Install with: pip install moviepy")
 
-# Optional Pydub for audio preprocessing
-try:
-    from pydub import AudioSegment
-    PYDUB_AVAILABLE = True
-except ImportError:
-    PYDUB_AVAILABLE = False
+def get_rotation(container) -> int:
+    """
+    Extract rotation from video stream side data.
+    Returns rotation in degrees (0, 90, 180, or 270)
+    """
+    for stream in container.streams.video:
+        for frame in container.decode(video=0):
+            if frame.side_data:
+                for side_data in frame.side_data:
+                    if 'DISPLAYMATRIX' in str(side_data.type):
+                        print(f"  Found rotation metadata: {side_data}")
+                        return 90
+            break
+        break
+    return 0
+
+
+def rotate_frame(frame_array: np.ndarray, rotation: int) -> np.ndarray:
+    """Rotate frame by specified degrees."""
+    if rotation == 0:
+        return frame_array
+    elif rotation == 90:
+        return cv2.rotate(frame_array, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    elif rotation == 180:
+        return cv2.rotate(frame_array, cv2.ROTATE_180)
+    elif rotation == 270:
+        return cv2.rotate(frame_array, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    else:
+        print(f"Warning: Unsupported rotation {rotation}°, not rotating")
+        return frame_array
 
 
 class BRollAnalyzer:
@@ -52,7 +68,6 @@ class BRollAnalyzer:
         prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
         curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
 
-        # Motion score
         flow = cv2.calcOpticalFlowFarneback(
             prev_gray, curr_gray, None,
             pyr_scale=0.5, levels=3, winsize=15,
@@ -62,16 +77,13 @@ class BRollAnalyzer:
         avg_motion = np.mean(magnitude)
         scores['motion'] = self._score_motion_for_broll(avg_motion)
 
-        # Stability score
         motion_variance = np.std(magnitude)
         scores['stability'] = 1.0 / (1.0 + motion_variance / 10.0)
 
-        # Visual complexity
         edges = cv2.Canny(curr_gray, 50, 150)
         edge_density = np.count_nonzero(edges) / edges.size
         scores['complexity'] = min(edge_density * 10, 1.0)
 
-        # Color richness
         hsv = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2HSV)
         saturation = hsv[:, :, 1]
         avg_saturation = np.mean(saturation) / 255.0
@@ -103,115 +115,6 @@ class BRollAnalyzer:
         )
 
 
-class MusicOverlay:
-    """Handles background music overlay on video"""
-
-    def __init__(self, music_dir: Optional[str] = None):
-        if not MOVIEPY_AVAILABLE:
-            raise RuntimeError("MoviePy not installed. Cannot add music.")
-
-        self.music_dir = Path(music_dir) if music_dir else None
-        self.available_tracks = []
-
-        if self.music_dir and self.music_dir.exists():
-            self.available_tracks = list(self.music_dir.glob('*.mp3')) + \
-                                   list(self.music_dir.glob('*.wav'))
-            print(f"Found {len(self.available_tracks)} music tracks in {music_dir}")
-
-    def select_random_track(self) -> Optional[Path]:
-        """Select random music track"""
-        if not self.available_tracks:
-            return None
-        return random.choice(self.available_tracks)
-
-    def add_music(self,
-                  video_path: Path,
-                  output_path: Path,
-                  music_path: Optional[Path] = None,
-                  volume: float = 0.35,
-                  fade_duration: float = 2.0,
-                  normalize: bool = True):
-        """
-        Add background music to video.
-
-        Args:
-            video_path: Input video file
-            output_path: Output video file
-            music_path: Specific music file (or None for random)
-            volume: Music volume (0.0-1.0)
-            fade_duration: Fade duration in seconds
-            normalize: Normalize audio levels
-        """
-        if music_path is None:
-            music_path = self.select_random_track()
-
-        if music_path is None:
-            raise ValueError("No music file specified and no tracks available")
-
-        print(f"  Adding music: {music_path.name}")
-
-        # Load video
-        video = VideoFileClip(str(video_path))
-        video_duration = video.duration
-
-        # Preprocess with Pydub if available
-        temp_music = None
-        if normalize and PYDUB_AVAILABLE:
-            try:
-                audio_seg = AudioSegment.from_file(str(music_path))
-                audio_seg = audio_seg.normalize()
-
-                # Loop or trim
-                target_ms = int(video_duration * 1000)
-                if len(audio_seg) < target_ms:
-                    loops = (target_ms // len(audio_seg)) + 1
-                    audio_seg = (audio_seg * loops)[:target_ms]
-                else:
-                    audio_seg = audio_seg[:target_ms]
-
-                temp_music = f"/tmp/music_{output_path.stem}.mp3"
-                audio_seg.export(temp_music, format="mp3")
-                music_path = temp_music
-            except Exception as e:
-                print(f"  Warning: Pydub processing failed: {e}")
-
-        # Load music
-        music = AudioFileClip(str(music_path))
-
-        # Apply volume and fades
-        music = (music
-            .with_duration(video_duration)
-            .with_volume_scaled(volume)
-            .audio_fadein(fade_duration)
-            .audio_fadeout(fade_duration))
-
-        # Mix with original audio
-        if video.audio:
-            final_audio = CompositeAudioClip([video.audio, music])
-        else:
-            final_audio = music
-
-        final = video.with_audio(final_audio)
-
-        # Write output
-        final.write_videofile(
-            str(output_path),
-            codec='libx264',
-            audio_codec='aac',
-            audio_bitrate='192k',
-            preset='medium',
-            ffmpeg_params=['-crf', '18'],
-            logger=None  # Suppress moviepy output
-        )
-
-        # Cleanup
-        video.close()
-        music.close()
-
-        if temp_music and Path(temp_music).exists():
-            Path(temp_music).unlink()
-
-
 class ReelExtractor:
     """Main class for extracting reels from video"""
 
@@ -219,17 +122,23 @@ class ReelExtractor:
                  min_duration=10,
                  max_duration=30,
                  target_duration=20,
-                 sample_rate=5):
+                 sample_rate=5,
+                 music_dir: Optional[Path] = None,
+                 music_volume: float = 0.3):
         self.min_duration = min_duration
         self.max_duration = max_duration
         self.target_duration = target_duration
         self.sample_rate = sample_rate
         self.analyzer = BRollAnalyzer()
+        self.music_dir = music_dir
+        self.music_volume = music_volume
 
     def get_video_info(self, video_path: str) -> Dict:
-        """Extract video metadata"""
+        """Extract video metadata including rotation"""
         container = av.open(video_path)
         video_stream = container.streams.video[0]
+
+        rotation = get_rotation(container)
 
         info = {
             'duration': float(video_stream.duration * video_stream.time_base),
@@ -237,25 +146,28 @@ class ReelExtractor:
             'width': video_stream.width,
             'height': video_stream.height,
             'codec': video_stream.codec_context.name,
-            'total_frames': video_stream.frames
+            'total_frames': video_stream.frames,
+            'rotation': rotation
         }
 
         container.close()
         return info
 
-    def analyze_video(self, video_path: str) -> List[Dict]:
-        """Analyze video and score segments"""
+    def analyze_video(self, video_path: str) -> Tuple[List[Dict], int]:
+        """Analyze video and score segments. Returns (segments, rotation)"""
         print(f"\nAnalyzing: {Path(video_path).name}")
 
         container = av.open(video_path)
-        video_stream = container.streams.video[0]
 
         info = self.get_video_info(video_path)
         fps = info['fps']
         duration = info['duration']
+        rotation = info['rotation']
 
         print(f"Duration: {duration:.1f}s | FPS: {fps:.1f} | "
               f"Resolution: {info['width']}x{info['height']}")
+        if rotation:
+            print(f"Rotation: {rotation}° (will be corrected in output)")
 
         frame_scores = []
         prev_frame = None
@@ -272,6 +184,10 @@ class ReelExtractor:
                     continue
 
                 img = frame.to_ndarray(format='bgr24')
+
+                if rotation:
+                    img = rotate_frame(img, rotation)
+
                 timestamp = float(frame.time)
 
                 if prev_frame is not None:
@@ -296,7 +212,7 @@ class ReelExtractor:
         print(f"Analyzed {len(frame_scores)} frame pairs")
 
         segments = self._find_best_segments(frame_scores, self.target_duration, fps)
-        return segments
+        return segments, rotation
 
     def _find_best_segments(self, frame_scores: List[Dict],
                            window_duration: float, fps: float) -> List[Dict]:
@@ -353,112 +269,118 @@ class ReelExtractor:
 
         return result
 
+    def _get_music_files(self) -> List[Path]:
+        """Get list of available music files"""
+        if not self.music_dir or not self.music_dir.exists():
+            return []
+
+        music_files = []
+        for ext in ['*.mp3', '*.wav', '*.ogg', '*.m4a']:
+            music_files.extend(self.music_dir.glob(ext))
+
+        return sorted(music_files)
+
     def extract_segments(self, video_path: str, segments: List[Dict],
-                        output_dir: Path, add_music: bool = False,
-                        music_overlay: Optional[MusicOverlay] = None):
-        """Extract video segments"""
+                        output_dir: Path, rotation: int = 0):
+        """Extract video segments with rotation correction and music"""
         output_dir.mkdir(parents=True, exist_ok=True)
         video_name = Path(video_path).stem
 
-        print(f"\nExtracting {len(segments)} segments...")
+        music_files = self._get_music_files()
+        if music_files:
+            print(f"\nFound {len(music_files)} music track(s)")
+        else:
+            print(f"\nNo music found in {self.music_dir}, extracting without audio")
+
+        print(f"Extracting {len(segments)} segments...")
+        if rotation:
+            print(f"  Correcting rotation: {rotation}°")
 
         for idx, segment in enumerate(segments):
-            base_name = f"{video_name}_reel_{idx+1:02d}_score{segment['score']:.2f}"
-            temp_path = output_dir / f"{base_name}_temp.mp4"
-            final_path = output_dir / f"{base_name}.mp4"
+            output_path = output_dir / f"{video_name}_reel_{idx+1:02d}_score{segment['score']:.2f}.mp4"
+
+            music_file = random.choice(music_files) if music_files else None
 
             try:
-                # Extract segment
-                self._extract_segment(
+                self._extract_segment_ffmpeg(
                     video_path,
                     segment['start_time'],
-                    segment['end_time'],
-                    temp_path if add_music else final_path
+                    segment['duration'],
+                    output_path,
+                    rotation,
+                    music_file
                 )
-
-                # Add music if requested
-                if add_music and music_overlay and MOVIEPY_AVAILABLE:
-                    music_overlay.add_music(temp_path, final_path)
-                    temp_path.unlink()  # Remove temp file
-
-                print(f"✓ {final_path.name} ({segment['duration']:.1f}s, "
-                      f"score: {segment['score']:.3f})")
-
+                music_name = music_file.stem if music_file else "no audio"
+                print(f"✓ {output_path.name} ({segment['duration']:.1f}s, "
+                      f"score: {segment['score']:.3f}, music: {music_name})")
             except Exception as e:
                 print(f"✗ Failed segment {idx+1}: {e}")
 
-    def _extract_segment(self, input_path: str, start_time: float,
-                        end_time: float, output_path: Path):
-        """Extract a single segment"""
-        input_container = av.open(input_path)
-        output_container = av.open(str(output_path), 'w')
+    def _extract_segment_ffmpeg(self, input_path: str, start_time: float,
+                                duration: float, output_path: Path,
+                                rotation: int = 0, music_file: Optional[Path] = None):
+        """Extract segment using FFmpeg with music replacement"""
 
-        try:
-            input_stream = input_container.streams.video[0]
+        cmd = [
+            'ffmpeg',
+            '-y',
+            '-ss', str(start_time),
+            '-i', input_path,
+        ]
 
-            output_stream = output_container.add_stream(
-                'libx264',
-                rate=input_stream.average_rate
-            )
-            output_stream.width = input_stream.width
-            output_stream.height = input_stream.height
-            output_stream.pix_fmt = 'yuv420p'
-            output_stream.options = {'crf': '18', 'preset': 'medium'}
+        if music_file:
+            cmd.extend([
+                '-stream_loop', '-1',
+                '-i', str(music_file),
+            ])
 
-            seek_point = int(start_time * av.time_base)
-            input_container.seek(seek_point)
+        cmd.extend(['-t', str(duration)])
 
-            # Handle audio
-            audio_stream = None
-            output_audio_stream = None
-            if input_container.streams.audio:
-                audio_stream = input_container.streams.audio[0]
-                output_audio_stream = output_container.add_stream(
-                    audio_stream.codec_context.name,
-                    rate=audio_stream.rate
-                )
+        vf_filters = []
+        if rotation == 90:
+            vf_filters.append('transpose=2')
+        elif rotation == 180:
+            vf_filters.append('transpose=2,transpose=2')
+        elif rotation == 270:
+            vf_filters.append('transpose=1')
 
-            # Encode frames
-            for packet in input_container.demux(video=0, audio=0 if audio_stream else None):
-                if packet.stream.type == 'video':
-                    for frame in packet.decode():
-                        if frame.time < start_time:
-                            continue
-                        if frame.time > end_time:
-                            break
+        if vf_filters:
+            cmd.extend(['-vf', ','.join(vf_filters)])
 
-                        for new_packet in output_stream.encode(frame):
-                            output_container.mux(new_packet)
+        cmd.extend([
+            '-c:v', 'libx264',
+            '-crf', '18',
+            '-preset', 'medium',
+        ])
 
-                elif packet.stream.type == 'audio' and output_audio_stream:
-                    for frame in packet.decode():
-                        if frame.time < start_time:
-                            continue
-                        if frame.time > end_time:
-                            break
+        if music_file:
+            cmd.extend([
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                '-filter:a', f'volume={self.music_volume}',
+                '-shortest',
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+            ])
+        else:
+            cmd.extend(['-an'])
 
-                        for new_packet in output_audio_stream.encode(frame):
-                            output_container.mux(new_packet)
+        cmd.append(str(output_path))
 
-                if packet.pts * packet.time_base > end_time:
-                    break
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
 
-            # Flush
-            for packet in output_stream.encode(None):
-                output_container.mux(packet)
-
-            if output_audio_stream:
-                for packet in output_audio_stream.encode(None):
-                    output_container.mux(packet)
-
-        finally:
-            input_container.close()
-            output_container.close()
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg failed: {result.stderr}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Extract interesting reels from B-roll footage with optional music'
+        description='Extract interesting reels with background music'
     )
     parser.add_argument('input', nargs='+', help='Input video file(s)')
     parser.add_argument('-o', '--output', default='reels',
@@ -473,40 +395,24 @@ def main():
                        help='Target reel duration in seconds (default: 20)')
     parser.add_argument('--sample-rate', type=int, default=5,
                        help='Process every Nth frame (default: 5)')
+    parser.add_argument('--music-dir', type=Path, default=Path('music/viral'),
+                       help='Directory with music files (default: music/viral/)')
+    parser.add_argument('--music-volume', type=float, default=0.3,
+                       help='Music volume (0.0-1.0, default: 0.3)')
     parser.add_argument('--save-analysis', action='store_true',
                        help='Save analysis JSON')
-    parser.add_argument('--add-music', action='store_true',
-                       help='Add background music to reels')
-    parser.add_argument('--music-dir', type=str,
-                       help='Directory containing music files')
-    parser.add_argument('--music-volume', type=float, default=0.35,
-                       help='Music volume 0.0-1.0 (default: 0.35)')
-    parser.add_argument('--music-fade', type=float, default=2.0,
-                       help='Music fade duration in seconds (default: 2.0)')
 
     args = parser.parse_args()
 
-    # Check music requirements
-    if args.add_music:
-        if not MOVIEPY_AVAILABLE:
-            print("Error: MoviePy required for music. Install: pip install moviepy")
-            sys.exit(1)
-        if not args.music_dir:
-            print("Error: --music-dir required when using --add-music")
-            sys.exit(1)
-
     output_dir = Path(args.output)
-
-    # Initialize music overlay if needed
-    music_overlay = None
-    if args.add_music:
-        music_overlay = MusicOverlay(args.music_dir)
 
     extractor = ReelExtractor(
         min_duration=args.min_duration,
         max_duration=args.max_duration,
         target_duration=args.target_duration,
-        sample_rate=args.sample_rate
+        sample_rate=args.sample_rate,
+        music_dir=args.music_dir,
+        music_volume=args.music_volume
     )
 
     for video_path in args.input:
@@ -515,7 +421,7 @@ def main():
             continue
 
         info = extractor.get_video_info(video_path)
-        segments = extractor.analyze_video(video_path)
+        segments, rotation = extractor.analyze_video(video_path)
 
         if not segments:
             print(f"No suitable segments found in {video_path}")
@@ -533,7 +439,8 @@ def main():
             with open(analysis_path, 'w') as f:
                 json.dump({
                     'video_info': info,
-                    'segments': segments[:args.num_reels]
+                    'segments': segments[:args.num_reels],
+                    'rotation_corrected': rotation
                 }, f, indent=2)
             print(f"Saved analysis to: {analysis_path}")
 
@@ -541,8 +448,7 @@ def main():
             video_path,
             segments[:args.num_reels],
             output_dir,
-            add_music=args.add_music,
-            music_overlay=music_overlay
+            rotation=rotation
         )
 
     print(f"\n✓ Complete! Reels saved to: {output_dir}/")
