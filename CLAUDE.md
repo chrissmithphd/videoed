@@ -23,11 +23,12 @@ Future: Add audio and text overlays to extracted reels.
 - **PyAV (v17.1.0)** - Video I/O with FFmpeg bindings (quality preservation)
 - **PySceneDetect (v0.7)** - Scene boundary detection
 - **OpenCV (v4.13+)** - Motion analysis via optical flow
+- **SciPy + NumPy** - Programmatic music generation (drums, bass, melody)
 - **Optional: Ultralytics YOLO (v8.4+)** - ML-based object detection (GPU)
 
 ### Pipeline Flow
 ```
-Video Input → Scene Detection → Interest Scoring → Ranking → Segment Extraction → Reels
+Video Input → Scene Detection → Interest Scoring → Ranking → Segment Extraction → Music Generation → Audio Overlay → Reels
 ```
 
 ### Interest Scoring Formula
@@ -68,6 +69,13 @@ score = (motion * 0.4) + (visual_complexity * 0.3) + (objects * 0.2) + (diversit
 - Real-time tracking built-in
 - Warning: AGPL-3.0 license (enterprise requires paid license)
 
+**SciPy + NumPy for Music:**
+- Zero additional dependencies (already installed)
+- 0.1-0.2s generation time for 20s track
+- Full synthesis control (drums, bass, melody)
+- Commercial-friendly BSD license
+- Alternative: pyo for professional effects (reverb, compression)
+
 ## Project Structure
 
 ```
@@ -77,15 +85,19 @@ videoed/
 │       └── current_plan.md          # Task tracking
 ├── AUDIO_SEARCH_OPTIONS.md          # Audio search APIs & MCP servers guide
 ├── CLAUDE.md                         # This file
+├── MUSIC_GENERATION_RESEARCH.md     # Music generation library comparison
 ├── README.md                         # Project documentation
 ├── RESEARCH.md                       # Detailed research findings
+├── music_generator_example.py       # Working music generator (SciPy + NumPy)
+├── generate_music_styles.py         # 5 style variations (EDM, Funk, Rock, Tropical, Hip-Hop)
 └── (future) src/videoreel/          # Implementation
     ├── __init__.py
     ├── scene_detector.py
     ├── motion_analyzer.py
     ├── interest_scorer.py
     ├── segment_extractor.py
-    ├── audio_finder.py              # NEW: Unified CC music search
+    ├── audio_finder.py              # Unified CC music search (external sources)
+    ├── music_generator.py           # Programmatic music generation (SciPy)
     └── cli.py
 ```
 
@@ -118,16 +130,18 @@ videoed/
 
 ## Installation Commands
 
-### Minimal (CPU Only)
+### Minimal (CPU Only + Music Generation)
 ```bash
-pip install opencv-python scenedetect av numpy
+pip install opencv-python scenedetect av numpy scipy
 sudo apt-get install ffmpeg  # or brew install ffmpeg
 ```
 
-### Full (ML-Enhanced)
+### Full (ML-Enhanced + Advanced Audio)
 ```bash
-pip install opencv-python scenedetect av numpy ultralytics torch
+pip install opencv-python scenedetect av numpy scipy ultralytics torch
 pip install torch --index-url https://download.pytorch.org/whl/cu121  # CUDA 12.1
+# Optional: pyo for professional audio effects
+pip install pyo
 ```
 
 ### Audio Search (Creative Commons Music)
@@ -150,10 +164,14 @@ cd freesound-mcp-server && docker build -t freesound-mcp .
 5. Add progress bars (tqdm) early - critical for long video UX
 
 ### If Continuing Research:
-- **Audio overlay:** COMPLETE - See `AUDIO_SEARCH_OPTIONS.md` for MCP servers and APIs
-  - Recommended: Jamendo API (primary), Freesound API (secondary)
-  - MCP Server: Freesound MCP (johnkimdw/freesound-mcp-server)
-  - Python implementation: Unified AudioFinder class included
+- **Audio overlay:** COMPLETE - Two approaches available:
+  1. **External Music:** See `AUDIO_SEARCH_OPTIONS.md` for MCP servers and APIs
+     - Jamendo API (primary), Freesound API (secondary)
+     - MCP Server: Freesound MCP (johnkimdw/freesound-mcp-server)
+  2. **Programmatic Music:** See `MUSIC_GENERATION_RESEARCH.md` for synthesis
+     - Recommended: SciPy + NumPy (0.1s generation, zero dependencies)
+     - Alternative: pyo (professional DSP features)
+     - 5 style variations implemented (EDM, Funk, Rock, Tropical, Hip-Hop)
 - Text overlay: Research Pillow + OpenCV or MoviePy TextClip
 - Speech-to-text: Research OpenAI Whisper for auto-captioning
 
@@ -183,5 +201,7 @@ cd freesound-mcp-server && docker build -t freesound-mcp .
 ---
 
 **Research completed:** 2026-06-24  
-**Research agent ID:** a0d77fa9b06644079 (35k tokens, comprehensive analysis)  
+**Video research agent ID:** a0d77fa9b06644079 (35k tokens, comprehensive analysis)  
+**Audio search research:** 2026-06-24 (agent ID: ae75b91a40f65e2fc)  
+**Music generation research:** 2026-06-24 (agent ID: a7676487dca6ebade)  
 **Current plan:** `.claude/plans/VideoReel-Generator/current_plan.md`
