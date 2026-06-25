@@ -20,8 +20,8 @@ import re
 from pathlib import Path
 
 
-def load_first_segment(text_file):
-    """Load first text segment (before first --) from file."""
+def load_all_segments(text_file):
+    """Load all text segments from file."""
     text_path = Path(text_file)
     if not text_path.exists():
         raise FileNotFoundError(f"Text file not found: {text_file}")
@@ -29,17 +29,22 @@ def load_first_segment(text_file):
     with open(text_path, "r") as f:
         content = f.read()
 
-    # Get first segment (before first --)
+    # Split by --
     segments = content.split("--")
     if not segments:
         raise ValueError("No text segments found")
 
-    # Clean up first segment
-    first_segment = segments[0].strip()
-    if not first_segment:
-        raise ValueError("First text segment is empty")
+    # Clean up segments and filter empty ones
+    cleaned_segments = []
+    for seg in segments:
+        cleaned = seg.strip()
+        if cleaned:
+            cleaned_segments.append(cleaned)
 
-    return first_segment
+    if not cleaned_segments:
+        raise ValueError("No valid text segments found")
+
+    return cleaned_segments
 
 
 def split_into_phrases(text, max_words_per_phrase=3):
@@ -140,7 +145,7 @@ def add_text_overlay(video_path, text_filter, output_path):
 def main():
     parser = argparse.ArgumentParser(description="Add text overlay to videos")
     parser.add_argument("videos", nargs="+", help="Input video files")
-    parser.add_argument("--text-file", required=True, help="Text file (uses first segment)")
+    parser.add_argument("--text-file", required=True, help="Text file (cycles through all segments)")
     parser.add_argument("--output-dir", required=True, help="Output directory")
     parser.add_argument("--max-words", type=int, default=3, help="Max words per phrase (default: 3)")
 
@@ -150,24 +155,27 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load and split text
-    first_segment = load_first_segment(args.text_file)
-    phrases = split_into_phrases(first_segment, args.max_words)
+    # Load all text segments
+    all_segments = load_all_segments(args.text_file)
 
-    print(f"Loaded text from {args.text_file}")
-    print(f"Split into {len(phrases)} phrases:")
-    for i, phrase in enumerate(phrases, 1):
-        print(f"  {i}. {phrase}")
-    print()
+    print(f"Loaded {len(all_segments)} text segments from {args.text_file}")
     print(f"Processing {len(args.videos)} videos...")
     print()
 
-    # Process each video
-    for video_str in args.videos:
+    # Process each video with cycling through segments
+    for video_idx, video_str in enumerate(args.videos):
         video_path = Path(video_str)
         if not video_path.exists():
             print(f"WARNING: Skipping {video_str} (not found)")
             continue
+
+        # Cycle through segments (wrap around if more videos than segments)
+        segment_idx = video_idx % len(all_segments)
+        segment_text = all_segments[segment_idx]
+        phrases = split_into_phrases(segment_text, args.max_words)
+
+        print(f"Video {video_idx + 1}/{len(args.videos)}: {video_path.name}")
+        print(f"  Using text segment {segment_idx + 1}/{len(all_segments)} ({len(phrases)} phrases)")
 
         try:
             # Get video duration
@@ -186,7 +194,8 @@ def main():
             print(f"ERROR processing {video_path.name}: {e}")
             continue
 
-    print()
+        print()
+
     print(f"Done! Check {args.output_dir}/")
 
 
