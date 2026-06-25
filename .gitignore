@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
 env/
 *.egg-info/
 
@@ -37,3 +38,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.log
+tests/
+test_outputs/
+temp/
+final_reels/
